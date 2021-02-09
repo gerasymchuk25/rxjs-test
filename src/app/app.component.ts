@@ -1,6 +1,6 @@
 import { AfterViewInit, Component, ElementRef, OnDestroy, Renderer2, ViewChild } from '@angular/core';
 import { combineLatest, fromEvent, merge, Observable } from 'rxjs';
-import { first, map, startWith, take, takeWhile, withLatestFrom } from 'rxjs/operators';
+import { first, map, skipUntil, startWith, take, takeWhile, withLatestFrom } from 'rxjs/operators';
 import { UserData } from './user-data';
 
 @Component({
@@ -33,11 +33,11 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   subscribeOnFormChangeAndButtonClick(): void {
     const emailValidation$ = this.getValidationObservable(this.emailInput.nativeElement, 'input', 'blur');
     const passwordValidation$ = this.getValidationObservable(this.passwordInput.nativeElement, 'input', 'blur');
-    const repeatPasswordValidation$ = this.getRepeatEventValidationObservable(this.repeatPasswordInput.nativeElement);
+    const repeatPasswordValidation$ = this.getRepeatPasswordEventValidationObservable(this.repeatPasswordInput.nativeElement);
     const formValidationObservable$ = combineLatest([emailValidation$, passwordValidation$, repeatPasswordValidation$])
       .pipe(
         map((inputs: HTMLInputElement[]) => {
-          const valid = inputs[0].validity.valid && inputs[1].validity.valid && inputs[2].validity.valid;
+          const valid = inputs.every((e) => e.validity.valid);
           this.renderer.setProperty(this.submitButton.nativeElement, 'disabled', !valid);
           return {inputs, valid};
         })
@@ -50,16 +50,19 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       )
       .subscribe((result) => {
         const valid = result[1].valid;
-        const inputsData = result[1].inputs;
-        if (valid) {
-          const userData: UserData = {
-            email: inputsData[0].value,
-            password: inputsData[1].value,
-            confirmPassword: inputsData[2].value
-          };
-          alert(JSON.stringify(userData));
+        const data = result[1].inputs;
+        if (valid && data?.length > 0) {
+          alert(JSON.stringify(this.getUserData(data)));
         }
       });
+  }
+
+  getUserData(data: HTMLInputElement[]): UserData {
+    return {
+      email: data[0].value,
+      password: data[1].value,
+      confirmPassword: data[2].value
+    };
   }
 
   getFromEventObservable(target: any, eventName: string): Observable<HTMLInputElement> {
@@ -92,19 +95,22 @@ export class AppComponent implements AfterViewInit, OnDestroy {
       );
   }
 
-  getRepeatEventValidationObservable(el: HTMLInputElement): Observable<HTMLInputElement> {
+  getRepeatPasswordEventValidationObservable(el: HTMLInputElement): Observable<HTMLInputElement> {
     const blurEvent$ = this.getFromEventObservable(el, 'blur')
       .pipe(take(1));
     const inputEvent$ = this.getFromEventObservable(el, 'input');
-    const repeatPasswordEvents$ = merge(blurEvent$, inputEvent$);
-    const passwordInputEvent$ = this.getFromEventObservable(this.passwordInput.nativeElement, 'input');
+    const repeatPasswordEvents$ = merge(
+      inputEvent$.pipe(skipUntil(blurEvent$)),
+      blurEvent$
+    );
+    const passwordInputEvent$ = this.getFromEventObservable(this.passwordInput.nativeElement, 'input')
+      .pipe(startWith(this.passwordInput.nativeElement));
     return combineLatest([repeatPasswordEvents$, passwordInputEvent$])
       .pipe(
         map((input: HTMLInputElement[]) => {
           const repeatPasswordInput = input[0];
           const passwordInput = input[1];
-          const valid = repeatPasswordInput.value?.length > 0 && passwordInput?.value?.length > 0
-            && repeatPasswordInput.value === passwordInput.value;
+          const valid = repeatPasswordInput.value === passwordInput.value;
           valid ? repeatPasswordInput.setCustomValidity('') : repeatPasswordInput.setCustomValidity('Password do not match');
           this.validateInput(repeatPasswordInput, repeatPasswordInput.validity);
           return repeatPasswordInput;
@@ -117,21 +123,24 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     const formGroup = input.closest('.form-group') as HTMLDivElement;
     const labelElement = formGroup.querySelector('label') as HTMLLabelElement;
     const errorElement = formGroup.querySelector('.invalid-feedback') as HTMLSpanElement;
-    let textContent = '';
-    if (validity.valueMissing) {
-      textContent = `${labelElement.textContent} is required.`;
-    }
-    if (validity.patternMismatch) {
-      textContent = 'Wrong email format';
-    }
-    if (validity.tooShort) {
-      textContent = 'Too short password';
-    }
-    if (validity.customError) {
-      textContent = input.validationMessage;
-    }
     formGroup.classList.remove(validity.valid ? 'was-validated' : 'needs-validation');
     formGroup.classList.add(validity.valid ? 'needs-validation' : 'was-validated');
-    errorElement.textContent = textContent;
+    errorElement.textContent = this.getErrorMessage(input, validity, labelElement);
+  }
+
+  getErrorMessage(input: HTMLInputElement, validity: ValidityState, label: HTMLLabelElement): string {
+    if (validity.valueMissing) {
+      return `${label.textContent} is required.`;
+    }
+    if (validity.patternMismatch) {
+      return 'Wrong email format';
+    }
+    if (validity.tooShort) {
+      return 'Too short password';
+    }
+    if (validity.customError) {
+      return input.validationMessage;
+    }
+    return '';
   }
 }
