@@ -60,8 +60,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
   getUserData(data: HTMLInputElement[]): UserData {
     return {
       email: data[0].value,
-      password: data[1].value,
-      confirmPassword: data[2].value
+      password: data[1].value
     };
   }
 
